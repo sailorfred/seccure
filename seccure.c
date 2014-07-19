@@ -432,6 +432,54 @@ void app_encrypt(const char *pubkey)
   curve_release(cp);
 }
 
+void app_encrypt_buf( struct curve_params *cp, char *key,
+		      char *data_buf, int data_buf_len, int opt_maclen )
+{
+  struct affine_point P, R;
+
+  if (strlen(key) != cp->pk_len_compact) {
+    fatal("Invalid encryption key (wrong length)");
+  }
+  if (decompress_from_string(&P, key, DF_COMPACT, cp)) {
+    char rbuf[cp->pk_len_bin];
+    struct aes256ctr *ac;
+    char *keybuf, *md;
+    gcry_md_hd_t mh;
+
+    if (! (keybuf = gcry_malloc_secure(64)))
+      fatal("Out of secure memory");
+    R = ECIES_encryption(keybuf, &P, cp);
+    compress_to_string(rbuf, DF_BIN, &R, cp);
+    point_release(&P);
+    point_release(&R);
+
+    if (! (ac = aes256ctr_init(keybuf)))
+      fatal("Cannot initialize AES256-CTR");
+    if (opt_maclen && ! hmacsha256_init(&mh, keybuf + 32, HMAC_KEY_SIZE))
+      fatal("Cannot initialize HMAC-SHA256");
+    gcry_free(keybuf);
+
+    /* Write size and R (encrypted symmetric key).  Next: ciphertext and HMAC */
+    int32_t size = 32 + cp->pk_len_bin + opt_maclen;
+    write_block( opt_fdout, (char *) &size, 4 );
+    write_block( opt_fdout, rbuf, cp->pk_len_bin );
+
+    aes256ctr_enc( ac, data_buf, data_buf_len );
+    write_block( opt_fdout, data_buf, data_buf_len );
+
+    aes256ctr_done( ac );
+
+    gcry_md_write( mh, data_buf, data_buf_len );
+    gcry_md_final( mh );
+    md = (char *) gcry_md_read( mh, 0 );
+
+    write_block( opt_fdout, md, opt_maclen );
+    gcry_md_close( mh );
+  } else {
+    fatal( "Invalid encryption key" );
+  }
+}
+
 int app_decrypt(void)
 {
   struct curve_params *cp;
@@ -1111,6 +1159,78 @@ void app_dh(void)
     fatal("Invalid curve name");
 }
 
+char *malloc_with_null( char *buf, int len )
+{
+  char *ret = gcry_malloc_secure( len + 1 );
+
+  memcpy( ret, buf, len );
+  ret[len] = '\0';
+
+  return ret;
+}
+
+void app_pipe(void)
+{
+  /* byte ordering same as sender, since this works over a pipe */
+  union {
+    char chars[5]; /* last char is 1 byte command */
+    int32_t size;  /* binary size of cmd (1) + data */
+  } cmd_buf;
+  char *data_buf = NULL;
+  char *key = NULL;
+  struct curve_params *cp = NULL;
+
+  while ( read_block( opt_fdin, cmd_buf.chars, 5 ) ) {
+    if ( data_buf ) {
+      gcry_free( data_buf );
+    }
+    data_buf = gcry_malloc_secure( cmd_buf.size ); /* make room for \0 */
+    if ( ! read_block( opt_fdin, data_buf, cmd_buf.size - 1 ) ) {
+      fprintf( stderr, "Can't read %d bytes\n", cmd_buf.size );
+      break;
+    }
+    data_buf[cmd_buf.size-1] = '\0';
+    switch ( cmd_buf.chars[4] ) {
+    case 'c': /* Curve */
+      fprintf( stderr, "Curve %s\n", data_buf );
+      if ( cp ) {
+	curve_release( cp );
+      }
+      cp = curve_by_name( data_buf );
+      break;
+    case 'e': /* encrypt plaintext */
+      if ( ! cp ) {
+	fatal( "No curve specified" );
+      }
+      if ( opt_maclen <= 0 ) {
+	fatal( "No MAC length specified" );
+      }
+      if ( ! key ) {
+	fatal( "No public key specified" );
+      }
+      app_encrypt_buf( cp, key, data_buf, cmd_buf.size - 1, opt_maclen );
+      break;
+    case 'k': /* Key */
+      if ( key ) {
+	gcry_free( key );
+      }
+      key = data_buf;
+      data_buf = NULL;
+      fprintf( stderr, "key is %s\n", key );
+      break;
+    case 'm': /* MAC len */
+      opt_maclen = atoi( data_buf );
+      if (opt_maclen < 0 || opt_maclen > 256 || opt_maclen % 8) {
+	fatal("Invalid MAC length");
+      }
+      opt_maclen /= 8; /* bytes */
+      fprintf( stderr, "maclen is %d\n", opt_maclen );
+      break;
+    default: /* Out of sync */
+      return;
+    }
+  }
+}
 /******************************************************************************/
 
 int main(int argc, char **argv)
@@ -1265,6 +1385,14 @@ int main(int argc, char **argv)
         while(1) {
           app_dh();
         }
+  }
+  else if (!strcmp(action, "pipe")) {
+    if (opt_help || optind != argc)
+      puts("Run in pipe mode, with commands and data in a simple framed structure\n"
+	   "\n"
+	   "seccure pipe");
+    else
+      app_pipe();
   }
   else
     fatal("Unknown command");

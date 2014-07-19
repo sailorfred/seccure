@@ -88,6 +88,8 @@ the Web of Trust or even configuration files -- is required.
       <p><opt>seccure dh</opt>: Perform a Diffie-Hellman key
       exchange.</p>
       
+      <p><opt>seccure pipe</opt>: Run as a subprocess receiving simple framed commands on STDIN.</p>
+      
 </section>
 
 <options>
