@@ -460,7 +460,7 @@ void app_encrypt_buf( struct curve_params *cp, char *key,
     gcry_free(keybuf);
 
     /* Write size and R (encrypted symmetric key).  Next: ciphertext and HMAC */
-    int32_t size = 32 + cp->pk_len_bin + opt_maclen;
+    int32_t size = cp->pk_len_bin + data_buf_len + opt_maclen;
     write_block( opt_fdout, (char *) &size, 4 );
     write_block( opt_fdout, rbuf, cp->pk_len_bin );
 
@@ -1192,7 +1192,6 @@ void app_pipe(void)
     data_buf[cmd_buf.size-1] = '\0';
     switch ( cmd_buf.chars[4] ) {
     case 'c': /* Curve */
-      fprintf( stderr, "Curve %s\n", data_buf );
       if ( cp ) {
 	curve_release( cp );
       }
@@ -1216,7 +1215,6 @@ void app_pipe(void)
       }
       key = data_buf;
       data_buf = NULL;
-      fprintf( stderr, "key is %s\n", key );
       break;
     case 'm': /* MAC len */
       opt_maclen = atoi( data_buf );
@@ -1224,7 +1222,6 @@ void app_pipe(void)
 	fatal("Invalid MAC length");
       }
       opt_maclen /= 8; /* bytes */
-      fprintf( stderr, "maclen is %d\n", opt_maclen );
       break;
     default: /* Out of sync */
       return;
