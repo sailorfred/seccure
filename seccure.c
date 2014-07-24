@@ -1159,16 +1159,6 @@ void app_dh(void)
     fatal("Invalid curve name");
 }
 
-char *malloc_with_null( char *buf, int len )
-{
-  char *ret = gcry_malloc_secure( len + 1 );
-
-  memcpy( ret, buf, len );
-  ret[len] = '\0';
-
-  return ret;
-}
-
 void app_pipe(void)
 {
   /* byte ordering same as sender, since this works over a pipe */
@@ -1184,7 +1174,17 @@ void app_pipe(void)
     if ( data_buf ) {
       gcry_free( data_buf );
     }
-    data_buf = gcry_malloc_secure( cmd_buf.size ); /* make room for \0 */
+    if ( cmd_buf.chars[4] != 'e' ) {
+      data_buf = gcry_malloc_secure( cmd_buf.size ); /* make room for \0 */
+      if ( data_buf == NULL ) {
+	fatal( "Can't get enough secure memory\n" );
+      }
+    } else {
+      data_buf = gcry_malloc( cmd_buf.size );
+      if ( data_buf == NULL ) {
+	fatal( "Can't get enough memory" );
+      }
+    }
     if ( ! read_block( opt_fdin, data_buf, cmd_buf.size - 1 ) ) {
       fprintf( stderr, "Can't read %d bytes\n", cmd_buf.size );
       break;
