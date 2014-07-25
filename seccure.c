@@ -1296,8 +1296,9 @@ int main(int argc, char **argv)
   }
   else
     if (! opt_infile && ! isatty(STDIN_FILENO))
-      if ((opt_fdpw = open("/dev/tty", O_RDONLY)) < 0)
-	fatal_errno("Cannot open tty", errno);
+      if ( strcmp( argv[argc-1], "pipe" ) != 0 )
+	if ((opt_fdpw = open("/dev/tty", O_RDONLY)) < 0)
+	  fatal_errno("Cannot open tty", errno);
 
   if(optind >= argc) {
       fatal_errno("Command required!", 666);
